@@ -14,12 +14,20 @@ const geistMono = Geist_Mono({
 })
 
 export const metadata: Metadata = {
+  metadataBase: new URL('https://vibecheckmood.me'),
   title: 'Vibe Check ⚡ — One Outfit. One Meal. One Watch.',
-  description: 'Instant daily decisions for Gen-Z. Weather-synced, mood-aligned, connected with Zara, H&M, Myntra, Zomato, Swiggy and Netflix.',
+  description: 'Instant daily decisions for Gen-Z. Weather-synced, mood-aligned, connected with Zara, H&M, Myntra, ASOS, Uniqlo, Snitch and restaurant reservations.',
   openGraph: {
     title: 'Vibe Check ⚡',
     description: 'No scrolling. Just vibes. Daily outfit, meal, and watch in under 10 seconds.',
-    images: ['/og-default.png'],
+    url: 'https://vibecheckmood.me',
+    siteName: 'Vibe Check',
+    images: ['/api/og'],
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'Vibe Check ⚡',
+    description: 'No scrolling. Just vibes. What to wear, eat, and watch.',
   },
 }
 
