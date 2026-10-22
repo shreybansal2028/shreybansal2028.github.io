@@ -1,20 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getDodoClient, DODO_PRODUCTS, VipTier } from '@/lib/dodopayments'
+import { getRazorpayClient, RAZORPAY_PRODUCTS, RazorpayTier } from '@/lib/razorpay'
 import { createClient } from '@/lib/supabase/server'
 
+// Unified checkout endpoint routing to Razorpay
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => ({}))
-    const tier: VipTier = body.tier === 'lifetime' ? 'lifetime' : 'monthly'
-    const product = DODO_PRODUCTS[tier]
+    const tier: RazorpayTier = body.tier === 'lifetime' ? 'lifetime' : 'monthly'
+    const product = RAZORPAY_PRODUCTS[tier]
 
-    // Determine host origin
-    const origin =
-      req.headers.get('origin') ||
-      req.headers.get('referer')?.replace(/\/$/, '') ||
-      'https://vibecheckmood.me'
-
-    // Optional Supabase user
     let userEmail: string | undefined
     let userName: string | undefined
     let userId: string = 'guest'
@@ -34,66 +28,62 @@ export async function POST(req: NextRequest) {
           user.email?.split('@')[0]
       }
     } catch {
-      // Guest user checkout is supported
+      // Guest mode is permitted
     }
 
-    const dodo = getDodoClient()
+    const razorpay = getRazorpayClient()
+    const activeKeyId = process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || process.env.RAZORPAY_KEY_ID
 
-    // If Dodo API key is configured, initiate real Dodo checkout session
-    if (dodo && process.env.DODO_PAYMENTS_API_KEY) {
+    if (razorpay && activeKeyId) {
       try {
-        const session = await dodo.checkoutSessions.create({
-          product_cart: [
-            {
-              product_id: product.id,
-              quantity: 1,
-            },
-          ],
-          return_url: `${origin}/checkout/success?session_id={CHECKOUT_SESSION_ID}&tier=${tier}`,
-          cancel_url: `${origin}/pricing`,
-          customer: userEmail
-            ? {
-                email: userEmail,
-                name: userName || 'Vibe Member',
-              }
-            : undefined,
-          metadata: {
-            userId,
+        const order = await razorpay.orders.create({
+          amount: product.amountPaise,
+          currency: 'INR',
+          receipt: `rcpt_${tier}_${Date.now().toString().slice(-8)}`,
+          notes: {
             tier,
+            userId,
             productName: product.name,
           },
         })
 
-        if (session.checkout_url) {
-          return NextResponse.json({
-            url: session.checkout_url,
-            sessionId: session.session_id,
-            isDemo: false,
-          })
-        }
-      } catch (dodoError: any) {
-        console.error('Dodo Payments API error, falling back to simulation:', dodoError?.message || dodoError)
-        // If product ID doesn't exist yet on Dodo dashboard or invalid key, provide demo checkout
         return NextResponse.json({
-          url: `${origin}/checkout/success?tier=${tier}&demo=true&reason=dodo_api_fallback`,
-          sessionId: `demo_session_${Date.now()}`,
-          isDemo: true,
-          notice: 'Dodo API key/product not yet activated. Running in interactive demo mode.',
+          orderId: order.id,
+          amount: order.amount,
+          currency: order.currency,
+          keyId: activeKeyId,
+          productName: product.name,
+          tier,
+          prefill: {
+            name: userName || '',
+            email: userEmail || '',
+          },
+          isDemo: false,
         })
+      } catch (err: any) {
+        console.error('Razorpay order creation error:', err?.message || err)
       }
     }
 
-    // Demo / Sandbox mode fallback when API key is not configured in environment
+    // Interactive Demo / Sandbox fallback
     return NextResponse.json({
-      url: `${origin}/checkout/success?tier=${tier}&demo=true`,
-      sessionId: `demo_session_${Date.now()}`,
+      orderId: `order_demo_${Date.now()}`,
+      amount: product.amountPaise,
+      currency: 'INR',
+      keyId: activeKeyId || 'rzp_test_placeholder',
+      productName: product.name,
+      tier,
+      prefill: {
+        name: userName || 'Vibe VIP Member',
+        email: userEmail || 'guest@vibecheckmood.me',
+      },
       isDemo: true,
-      notice: 'Dodo Payments ready. Set DODO_PAYMENTS_API_KEY in .env.local to go live.',
+      notice: 'Razorpay keys not yet configured. Simulating interactive checkout modal.',
     })
   } catch (error: any) {
-    console.error('Checkout creation error:', error)
+    console.error('Checkout error:', error)
     return NextResponse.json(
-      { error: error?.message || 'Failed to initialize checkout session' },
+      { error: error?.message || 'Failed to initialize checkout' },
       { status: 500 }
     )
   }

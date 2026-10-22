@@ -10,35 +10,135 @@ import {
   Flame,
   ShieldCheck,
   ArrowRight,
-  ShoppingBag,
-  UtensilsCrossed,
-  RotateCcw,
   Star,
+  CreditCard,
+  QrCode,
+  Smartphone,
 } from 'lucide-react'
+
+// Helper to dynamically load Razorpay standard checkout script
+function loadRazorpayScript(): Promise<boolean> {
+  return new Promise((resolve) => {
+    if (typeof window === 'undefined') return resolve(false)
+    if ((window as any).Razorpay) return resolve(true)
+
+    const script = document.createElement('script')
+    script.src = 'https://checkout.razorpay.com/v1/checkout.js'
+    script.async = true
+    script.onload = () => resolve(true)
+    script.onerror = () => resolve(false)
+    document.body.appendChild(script)
+  })
+}
 
 export default function PricingPage() {
   const [billingCycle, setBillingCycle] = useState<'monthly' | 'lifetime'>('monthly')
   const [loadingTier, setLoadingTier] = useState<'monthly' | 'lifetime' | null>(null)
+  const [demoModalOpen, setDemoModalOpen] = useState(false)
+  const [pendingDemoTier, setPendingDemoTier] = useState<'monthly' | 'lifetime'>('monthly')
 
   const handleCheckout = async (tier: 'monthly' | 'lifetime') => {
     setLoadingTier(tier)
+
     try {
-      const res = await fetch('/api/checkout', {
+      // 1. Create Razorpay order
+      const res = await fetch('/api/razorpay/order', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ tier }),
       })
+
       const data = await res.json()
-      if (data.url) {
-        window.location.href = data.url
-      } else {
-        alert(data.error || 'Failed to initiate checkout')
-        setLoadingTier(null)
+
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to initialize order')
       }
+
+      // If in demo mode (no Razorpay keys added yet)
+      if (data.isDemo) {
+        setPendingDemoTier(tier)
+        setDemoModalOpen(true)
+        setLoadingTier(null)
+        return
+      }
+
+      // 2. Load Razorpay Checkout SDK
+      const scriptLoaded = await loadRazorpayScript()
+      if (!scriptLoaded) {
+        alert('Could not load Razorpay SDK. Please check your internet connection.')
+        setLoadingTier(null)
+        return
+      }
+
+      // 3. Launch Razorpay Checkout Modal
+      const options = {
+        key: data.keyId,
+        amount: data.amount,
+        currency: data.currency,
+        name: 'Vibe Check ⚡',
+        description: data.productName,
+        order_id: data.orderId,
+        prefill: data.prefill,
+        theme: {
+          color: '#7c3aed',
+          backdrop_color: 'rgba(9, 9, 11, 0.95)',
+        },
+        handler: async function (response: any) {
+          try {
+            const verifyRes = await fetch('/api/razorpay/verify', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                razorpay_order_id: response.razorpay_order_id,
+                razorpay_payment_id: response.razorpay_payment_id,
+                razorpay_signature: response.razorpay_signature,
+                tier,
+              }),
+            })
+
+            const verifyData = await verifyRes.json()
+
+            if (verifyData.success) {
+              if (typeof window !== 'undefined') {
+                localStorage.setItem('vibe_vip', 'true')
+                localStorage.setItem('vibe_vip_tier', tier)
+              }
+              window.location.href = `/checkout/success?tier=${tier}&payment_id=${response.razorpay_payment_id}`
+            } else {
+              alert('Signature verification failed. Please contact support.')
+            }
+          } catch (err: any) {
+            alert('Verification error: ' + (err?.message || 'Contact support'))
+          } finally {
+            setLoadingTier(null)
+          }
+        },
+        modal: {
+          ondismiss: function () {
+            setLoadingTier(null)
+          },
+        },
+      }
+
+      const rzp = new (window as any).Razorpay(options)
+      rzp.on('payment.failed', function (response: any) {
+        alert('Payment Failed: ' + (response.error.description || 'Transaction declined'))
+        setLoadingTier(null)
+      })
+      rzp.open()
     } catch (e: any) {
       alert('Checkout error: ' + (e?.message || 'Please try again'))
       setLoadingTier(null)
     }
+  }
+
+  // Simulate demo payment completion
+  const handleSimulateDemoPayment = () => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('vibe_vip', 'true')
+      localStorage.setItem('vibe_vip_tier', pendingDemoTier)
+    }
+    window.location.href = `/checkout/success?tier=${pendingDemoTier}&demo=true&payment_id=pay_simulated_${Date.now().toString().slice(-6)}`
   }
 
   const freeFeatures = [
@@ -83,7 +183,7 @@ export default function PricingPage() {
             </span>
           </h1>
           <p className="text-zinc-400 text-base sm:text-lg max-w-xl mx-auto">
-            Get unlimited AI re-spins, instant fashion store checkouts, restaurant reservation passes, and an exclusive VIP identity.
+            Zero limits on AI re-spins, instant Zara/H&M fashion store sync, and restaurant reservations. Powered by Razorpay.
           </p>
 
           {/* Toggle Monthly / Lifetime */}
@@ -157,7 +257,7 @@ export default function PricingPage() {
           <div className="relative p-6 sm:p-8 rounded-3xl bg-gradient-to-b from-zinc-900/90 via-zinc-900/70 to-black/90 border-2 border-violet-500/50 backdrop-blur-xl shadow-2xl shadow-violet-500/20 flex flex-col justify-between overflow-hidden">
             {/* Top highlight gradient */}
             <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-violet-500 via-pink-500 to-amber-400" />
-            
+
             {/* Popular Pill */}
             <div className="absolute -top-3 right-6">
               <span className="px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest bg-gradient-to-r from-pink-500 via-rose-500 to-amber-500 text-white shadow-md flex items-center gap-1">
@@ -181,12 +281,12 @@ export default function PricingPage() {
                 {billingCycle === 'monthly' ? (
                   <>
                     <span className="text-4xl sm:text-5xl font-black text-white">₹199</span>
-                    <span className="text-zinc-400 text-sm font-semibold">/ month ($4.99)</span>
+                    <span className="text-zinc-400 text-sm font-semibold">/ month</span>
                   </>
                 ) : (
                   <>
                     <span className="text-4xl sm:text-5xl font-black text-white">₹999</span>
-                    <span className="text-zinc-400 text-sm font-semibold">one-time ($19.99)</span>
+                    <span className="text-zinc-400 text-sm font-semibold">one-time lifetime</span>
                   </>
                 )}
               </div>
@@ -208,7 +308,7 @@ export default function PricingPage() {
               </div>
             </div>
 
-            {/* Dodo Payments Button */}
+            {/* Razorpay Button */}
             <div>
               <button
                 onClick={() => handleCheckout(billingCycle)}
@@ -218,26 +318,39 @@ export default function PricingPage() {
                 {loadingTier === billingCycle ? (
                   <div className="flex items-center gap-2">
                     <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                    <span>Connecting Dodo Payments...</span>
+                    <span>Opening Razorpay...</span>
                   </div>
                 ) : (
                   <>
                     <Crown className="w-5 h-5 fill-amber-300 text-amber-300" />
-                    <span>Upgrade to VIP Now</span>
+                    <span>Pay with Razorpay (UPI / Cards)</span>
                     <ArrowRight className="w-4 h-4" />
                   </>
                 )}
               </button>
 
-              <div className="flex items-center justify-center gap-2 mt-3 text-[11px] text-zinc-400">
-                <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-                <span>Secured by Dodo Payments · Instant Activation · UPI, Cards & Apple Pay</span>
+              {/* Razorpay Methods Row */}
+              <div className="flex flex-wrap items-center justify-center gap-3 mt-3.5 text-[11px] text-zinc-400">
+                <span className="flex items-center gap-1">
+                  <Smartphone className="w-3.5 h-3.5 text-emerald-400" />
+                  UPI & QR (GPay / PhonePe / Paytm)
+                </span>
+                <span>•</span>
+                <span className="flex items-center gap-1">
+                  <CreditCard className="w-3.5 h-3.5 text-violet-400" />
+                  Cards & Netbanking
+                </span>
+                <span>•</span>
+                <span className="flex items-center gap-1">
+                  <ShieldCheck className="w-3.5 h-3.5 text-sky-400" />
+                  Razorpay Secured
+                </span>
               </div>
             </div>
           </div>
         </div>
 
-        {/* Social Proof / Guarantee */}
+        {/* Social Proof */}
         <div className="mt-14 p-6 rounded-2xl bg-zinc-900/40 border border-white/5 text-center">
           <div className="flex items-center justify-center gap-1 text-amber-400 mb-2">
             {[...Array(5)].map((_, i) => (
@@ -250,6 +363,58 @@ export default function PricingPage() {
           <p className="text-zinc-500 text-xs mt-1">— Riya S., Mumbai</p>
         </div>
       </div>
+
+      {/* Demo Modal for Instant Sandbox Testing */}
+      {demoModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-150">
+          <div className="max-w-md w-full p-6 rounded-3xl bg-zinc-900 border-2 border-violet-500/50 shadow-2xl text-center relative">
+            <div className="w-12 h-12 mx-auto rounded-2xl bg-violet-600/20 text-violet-400 flex items-center justify-center mb-4">
+              <QrCode className="w-6 h-6" />
+            </div>
+
+            <h3 className="text-xl font-black text-white mb-2">
+              Razorpay Interactive Simulator
+            </h3>
+            <p className="text-zinc-400 text-xs mb-6 leading-relaxed">
+              Razorpay API keys (<code className="text-violet-300">RAZORPAY_KEY_ID</code>) are ready to be configured. You can simulate an instant successful UPI payment right now to test the VIP activation flow!
+            </p>
+
+            <div className="p-3.5 rounded-xl bg-white/5 border border-white/10 text-left mb-6 text-xs text-zinc-300 space-y-1">
+              <div className="flex justify-between">
+                <span className="text-zinc-500">Tier:</span>
+                <span className="font-bold text-white capitalize">{pendingDemoTier} VIP Pass</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-zinc-500">Amount:</span>
+                <span className="font-bold text-emerald-400">
+                  {pendingDemoTier === 'monthly' ? '₹199' : '₹999'}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-zinc-500">Gateway:</span>
+                <span className="font-bold text-sky-400">Razorpay (Free Test Mode)</span>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <button
+                onClick={handleSimulateDemoPayment}
+                className="w-full py-3.5 px-4 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white font-bold text-sm shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-2 transition-all"
+              >
+                <Check className="w-4 h-4" />
+                <span>Simulate Successful Payment</span>
+              </button>
+
+              <button
+                onClick={() => setDemoModalOpen(false)}
+                className="w-full py-2.5 text-zinc-500 hover:text-white text-xs font-semibold"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
