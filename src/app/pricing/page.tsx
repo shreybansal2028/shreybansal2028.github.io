@@ -14,9 +14,10 @@ import {
   CreditCard,
   QrCode,
   Smartphone,
+  AlertCircle,
 } from 'lucide-react'
 
-// Helper to dynamically load Razorpay standard checkout script
+// Helper to dynamically load Razorpay standard checkout script if chosen
 function loadRazorpayScript(): Promise<boolean> {
   return new Promise((resolve) => {
     if (typeof window === 'undefined') return resolve(false)
@@ -33,15 +34,55 @@ function loadRazorpayScript(): Promise<boolean> {
 
 export default function PricingPage() {
   const [billingCycle, setBillingCycle] = useState<'monthly' | 'lifetime'>('monthly')
-  const [loadingTier, setLoadingTier] = useState<'monthly' | 'lifetime' | null>(null)
+  const [loadingGateway, setLoadingGateway] = useState<'dodo' | 'razorpay' | null>(null)
   const [demoModalOpen, setDemoModalOpen] = useState(false)
+  const [permissionNoticeOpen, setPermissionNoticeOpen] = useState(false)
   const [pendingDemoTier, setPendingDemoTier] = useState<'monthly' | 'lifetime'>('monthly')
 
-  const handleCheckout = async (tier: 'monthly' | 'lifetime') => {
-    setLoadingTier(tier)
+  // 1. Dodo Payments Checkout
+  const handleDodoCheckout = async (tier: 'monthly' | 'lifetime') => {
+    setLoadingGateway('dodo')
 
     try {
-      // 1. Create Razorpay order
+      const res = await fetch('/api/checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tier }),
+      })
+
+      const data = await res.json()
+
+      if (data.code === 'INSUFFICIENT_PERMISSION') {
+        setPendingDemoTier(tier)
+        setPermissionNoticeOpen(true)
+        setLoadingGateway(null)
+        return
+      }
+
+      if (data.url) {
+        window.location.href = data.url
+        return
+      }
+
+      if (data.isDemo) {
+        setPendingDemoTier(tier)
+        setDemoModalOpen(true)
+        setLoadingGateway(null)
+        return
+      }
+
+      throw new Error(data.error || 'Failed to initialize Dodo checkout')
+    } catch (err: any) {
+      alert('Checkout error: ' + (err?.message || 'Please try again'))
+      setLoadingGateway(null)
+    }
+  }
+
+  // 2. Razorpay Checkout
+  const handleRazorpayCheckout = async (tier: 'monthly' | 'lifetime') => {
+    setLoadingGateway('razorpay')
+
+    try {
       const res = await fetch('/api/razorpay/order', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -50,27 +91,20 @@ export default function PricingPage() {
 
       const data = await res.json()
 
-      if (!res.ok) {
-        throw new Error(data.error || 'Failed to initialize order')
-      }
-
-      // If in demo mode (no Razorpay keys added yet)
       if (data.isDemo) {
         setPendingDemoTier(tier)
         setDemoModalOpen(true)
-        setLoadingTier(null)
+        setLoadingGateway(null)
         return
       }
 
-      // 2. Load Razorpay Checkout SDK
       const scriptLoaded = await loadRazorpayScript()
       if (!scriptLoaded) {
-        alert('Could not load Razorpay SDK. Please check your internet connection.')
-        setLoadingTier(null)
+        alert('Could not load Razorpay SDK. Please check your connection.')
+        setLoadingGateway(null)
         return
       }
 
-      // 3. Launch Razorpay Checkout Modal
       const options = {
         key: data.keyId,
         amount: data.amount,
@@ -104,31 +138,25 @@ export default function PricingPage() {
                 localStorage.setItem('vibe_vip_tier', tier)
               }
               window.location.href = `/checkout/success?tier=${tier}&payment_id=${response.razorpay_payment_id}`
-            } else {
-              alert('Signature verification failed. Please contact support.')
             }
           } catch (err: any) {
             alert('Verification error: ' + (err?.message || 'Contact support'))
           } finally {
-            setLoadingTier(null)
+            setLoadingGateway(null)
           }
         },
         modal: {
           ondismiss: function () {
-            setLoadingTier(null)
+            setLoadingGateway(null)
           },
         },
       }
 
       const rzp = new (window as any).Razorpay(options)
-      rzp.on('payment.failed', function (response: any) {
-        alert('Payment Failed: ' + (response.error.description || 'Transaction declined'))
-        setLoadingTier(null)
-      })
       rzp.open()
     } catch (e: any) {
-      alert('Checkout error: ' + (e?.message || 'Please try again'))
-      setLoadingTier(null)
+      alert('Razorpay error: ' + (e?.message || 'Please try again'))
+      setLoadingGateway(null)
     }
   }
 
@@ -183,7 +211,7 @@ export default function PricingPage() {
             </span>
           </h1>
           <p className="text-zinc-400 text-base sm:text-lg max-w-xl mx-auto">
-            Zero limits on AI re-spins, instant Zara/H&M fashion store sync, and restaurant reservations. Powered by Razorpay.
+            Zero limits on AI re-spins, instant Zara & H&M store checkouts, and priority dining radars. Powered by Dodo Payments & Razorpay.
           </p>
 
           {/* Toggle Monthly / Lifetime */}
@@ -308,43 +336,52 @@ export default function PricingPage() {
               </div>
             </div>
 
-            {/* Razorpay Button */}
-            <div>
+            {/* Checkout Action Area */}
+            <div className="space-y-2.5">
+              {/* Primary: Dodo Payments */}
               <button
-                onClick={() => handleCheckout(billingCycle)}
-                disabled={loadingTier !== null}
+                onClick={() => handleDodoCheckout(billingCycle)}
+                disabled={loadingGateway !== null}
                 className="w-full py-4 px-6 rounded-2xl bg-gradient-to-r from-violet-600 via-fuchsia-600 to-pink-500 hover:from-violet-500 hover:to-pink-400 text-white font-black text-base tracking-wide shadow-lg shadow-violet-500/30 flex items-center justify-center gap-2 transition-all active:scale-[0.98] disabled:opacity-50"
               >
-                {loadingTier === billingCycle ? (
+                {loadingGateway === 'dodo' ? (
                   <div className="flex items-center gap-2">
                     <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                    <span>Opening Razorpay...</span>
+                    <span>Connecting Dodo Checkout...</span>
                   </div>
                 ) : (
                   <>
                     <Crown className="w-5 h-5 fill-amber-300 text-amber-300" />
-                    <span>Pay with Razorpay (UPI / Cards)</span>
+                    <span>Upgrade with Dodo Payments</span>
                     <ArrowRight className="w-4 h-4" />
                   </>
                 )}
               </button>
 
-              {/* Razorpay Methods Row */}
-              <div className="flex flex-wrap items-center justify-center gap-3 mt-3.5 text-[11px] text-zinc-400">
+              {/* Alternative: Razorpay */}
+              <button
+                onClick={() => handleRazorpayCheckout(billingCycle)}
+                disabled={loadingGateway !== null}
+                className="w-full py-2.5 px-4 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-bold text-zinc-300 hover:text-white flex items-center justify-center gap-2 transition-all"
+              >
+                {loadingGateway === 'razorpay' ? (
+                  <span>Opening Razorpay...</span>
+                ) : (
+                  <>
+                    <Smartphone className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Or Pay with Razorpay (UPI / QR / Netbanking)</span>
+                  </>
+                )}
+              </button>
+
+              {/* Payment Methods Badges */}
+              <div className="flex flex-wrap items-center justify-center gap-2 text-[10px] text-zinc-500 pt-1">
                 <span className="flex items-center gap-1">
-                  <Smartphone className="w-3.5 h-3.5 text-emerald-400" />
-                  UPI & QR (GPay / PhonePe / Paytm)
+                  <ShieldCheck className="w-3 h-3 text-emerald-400" />
+                  Cards, UPI, Apple Pay & Google Pay
                 </span>
                 <span>•</span>
-                <span className="flex items-center gap-1">
-                  <CreditCard className="w-3.5 h-3.5 text-violet-400" />
-                  Cards & Netbanking
-                </span>
-                <span>•</span>
-                <span className="flex items-center gap-1">
-                  <ShieldCheck className="w-3.5 h-3.5 text-sky-400" />
-                  Razorpay Secured
-                </span>
+                <span>Instant VIP Activation</span>
               </div>
             </div>
           </div>
@@ -364,6 +401,47 @@ export default function PricingPage() {
         </div>
       </div>
 
+      {/* Permission Notice Modal */}
+      {permissionNoticeOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-150">
+          <div className="max-w-md w-full p-6 rounded-3xl bg-zinc-900 border-2 border-amber-500/60 shadow-2xl text-center relative">
+            <div className="w-12 h-12 mx-auto rounded-2xl bg-amber-500/20 text-amber-400 flex items-center justify-center mb-4">
+              <AlertCircle className="w-6 h-6" />
+            </div>
+
+            <h3 className="text-xl font-black text-white mb-2">
+              Dodo API Key: Write Access Needed
+            </h3>
+            <p className="text-zinc-300 text-xs mb-4 leading-relaxed">
+              Your API key was detected with <strong>Read-Only</strong> permissions. Dodo requires <strong>Write / Full Access</strong> permissions to create checkout sessions.
+            </p>
+
+            <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/25 text-left mb-6 text-xs text-amber-200 space-y-1">
+              <div>1. Go to <strong>Dodo Payments $\rightarrow$ Developer $\rightarrow$ API Keys</strong></div>
+              <div>2. Click <strong>Create API Key</strong> and select <strong>Full Access / Write</strong></div>
+              <div>3. Paste your new key into chat and I will update Vercel instantly!</div>
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <button
+                onClick={handleSimulateDemoPayment}
+                className="w-full py-3.5 px-4 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white font-bold text-sm shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-2 transition-all"
+              >
+                <Check className="w-4 h-4" />
+                <span>Test Flow Now with Demo Simulator</span>
+              </button>
+
+              <button
+                onClick={() => setPermissionNoticeOpen(false)}
+                className="w-full py-2.5 text-zinc-500 hover:text-white text-xs font-semibold"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Demo Modal for Instant Sandbox Testing */}
       {demoModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center px-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-150">
@@ -373,10 +451,10 @@ export default function PricingPage() {
             </div>
 
             <h3 className="text-xl font-black text-white mb-2">
-              Razorpay Interactive Simulator
+              VIP Checkout Simulator
             </h3>
             <p className="text-zinc-400 text-xs mb-6 leading-relaxed">
-              Razorpay API keys (<code className="text-violet-300">RAZORPAY_KEY_ID</code>) are ready to be configured. You can simulate an instant successful UPI payment right now to test the VIP activation flow!
+              Simulate an instant successful payment right now to test the VIP perks unlock!
             </p>
 
             <div className="p-3.5 rounded-xl bg-white/5 border border-white/10 text-left mb-6 text-xs text-zinc-300 space-y-1">
@@ -389,10 +467,6 @@ export default function PricingPage() {
                 <span className="font-bold text-emerald-400">
                   {pendingDemoTier === 'monthly' ? '₹199' : '₹999'}
                 </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-zinc-500">Gateway:</span>
-                <span className="font-bold text-sky-400">Razorpay (Free Test Mode)</span>
               </div>
             </div>
 
