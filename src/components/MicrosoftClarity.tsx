@@ -4,12 +4,7 @@ import Script from 'next/script'
 
 export function MicrosoftClarity() {
   // Support environment variable or default fallback ID
-  const clarityId = process.env.NEXT_PUBLIC_CLARITY_PROJECT_ID
-
-  if (!clarityId) {
-    // If not configured yet, do not inject to avoid 404 tag errors
-    return null
-  }
+  const clarityId = process.env.NEXT_PUBLIC_CLARITY_PROJECT_ID || 'z2qrgn7lra'
 
   return (
     <Script
