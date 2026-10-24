@@ -37,7 +37,7 @@ export const metadata: Metadata = {
   verification: {
     google:
       process.env.NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION ||
-      'fRjW9Kj-vibecheckmood-google-verification',
+      'GhY6XtNJuO88SW6avv-zZ9HJV44BlYlo2Zpu2Ja26ac',
   },
   openGraph: {
     title: 'Vibe Check ⚡',
@@ -91,6 +91,10 @@ export default function RootLayout({
   return (
     <html lang="en" className="dark">
       <head>
+        <meta
+          name="google-site-verification"
+          content="GhY6XtNJuO88SW6avv-zZ9HJV44BlYlo2Zpu2Ja26ac"
+        />
         <script
           type="application/ld+json"
           dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
