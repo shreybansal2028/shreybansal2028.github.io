@@ -12,6 +12,9 @@ function CheckoutSuccessContent() {
   const paymentId = searchParams.get('payment_id') || searchParams.get('session_id')
   const isDemo = searchParams.get('demo') === 'true'
 
+  const orderId = searchParams.get('order_id')
+  const gateway = searchParams.get('gateway') || 'payment'
+
   const [activated, setActivated] = useState(false)
 
   useEffect(() => {
@@ -22,7 +25,25 @@ function CheckoutSuccessContent() {
       localStorage.setItem('vibe_vip_activated_at', new Date().toISOString())
       setActivated(true)
     }
-  }, [tier])
+
+    // If returning from Cashfree, trigger verification
+    if (orderId && gateway === 'cashfree') {
+      fetch('/api/cashfree/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orderId }),
+      }).catch((err) => console.error('Cashfree verify fetch error:', err))
+    }
+  }, [tier, orderId, gateway])
+
+  const gatewayLabel =
+    gateway === 'cashfree'
+      ? 'Cashfree (UPI / Cards)'
+      : gateway === 'dodo'
+      ? 'Dodo Payments'
+      : gateway === 'razorpay'
+      ? 'Razorpay'
+      : 'Secure Gateway'
 
   return (
     <div className="min-h-[80vh] flex items-center justify-center px-4 py-12 relative overflow-hidden">
@@ -47,7 +68,7 @@ function CheckoutSuccessContent() {
           Welcome to <span className="text-transparent bg-clip-text bg-gradient-to-r from-amber-300 via-pink-400 to-violet-400">VIBE VIP</span>!
         </h1>
         <p className="text-zinc-400 text-sm mb-6">
-          Your payment has been confirmed via Razorpay. All premium limits and exclusive styling radars are now unlocked for your account.
+          Your payment has been confirmed via {gatewayLabel}. All premium limits and exclusive styling radars are now unlocked for your account.
         </p>
 
         {/* Perks Unlocked Box */}
@@ -79,9 +100,9 @@ function CheckoutSuccessContent() {
           <ArrowRight className="w-5 h-5" />
         </Link>
 
-        {paymentId && (
+        {(paymentId || orderId) && (
           <p className="text-[10px] text-zinc-600 mt-4 truncate">
-            Payment ID: {paymentId}
+            Reference ID: {paymentId || orderId}
           </p>
         )}
       </div>

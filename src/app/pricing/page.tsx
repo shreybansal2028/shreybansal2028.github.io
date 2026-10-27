@@ -15,6 +15,7 @@ import {
   QrCode,
   Smartphone,
   AlertCircle,
+  Wallet,
 } from 'lucide-react'
 
 // Helper to dynamically load Razorpay standard checkout script if chosen
@@ -32,9 +33,24 @@ function loadRazorpayScript(): Promise<boolean> {
   })
 }
 
+// Helper to dynamically load Cashfree JS SDK v3
+function loadCashfreeScript(): Promise<any> {
+  return new Promise((resolve) => {
+    if (typeof window === 'undefined') return resolve(null)
+    if ((window as any).Cashfree) return resolve((window as any).Cashfree)
+
+    const script = document.createElement('script')
+    script.src = 'https://sdk.cashfree.com/js/v3/cashfree.js'
+    script.async = true
+    script.onload = () => resolve((window as any).Cashfree)
+    script.onerror = () => resolve(null)
+    document.body.appendChild(script)
+  })
+}
+
 export default function PricingPage() {
   const [billingCycle, setBillingCycle] = useState<'monthly' | 'lifetime'>('monthly')
-  const [loadingGateway, setLoadingGateway] = useState<'dodo' | 'razorpay' | null>(null)
+  const [loadingGateway, setLoadingGateway] = useState<'dodo' | 'razorpay' | 'cashfree' | null>(null)
   const [demoModalOpen, setDemoModalOpen] = useState(false)
   const [permissionNoticeOpen, setPermissionNoticeOpen] = useState(false)
   const [pendingDemoTier, setPendingDemoTier] = useState<'monthly' | 'lifetime'>('monthly')
@@ -156,6 +172,49 @@ export default function PricingPage() {
       rzp.open()
     } catch (e: any) {
       alert('Razorpay error: ' + (e?.message || 'Please try again'))
+      setLoadingGateway(null)
+    }
+  }
+
+  // 3. Cashfree Checkout (UPI, Cards, Netbanking)
+  const handleCashfreeCheckout = async (tier: 'monthly' | 'lifetime') => {
+    setLoadingGateway('cashfree')
+
+    try {
+      const res = await fetch('/api/cashfree/order', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tier }),
+      })
+
+      const data = await res.json()
+
+      if (data.isDemo) {
+        setPendingDemoTier(tier)
+        setDemoModalOpen(true)
+        setLoadingGateway(null)
+        return
+      }
+
+      if (!data.paymentSessionId) {
+        throw new Error(data.error || 'Failed to initialize Cashfree checkout session')
+      }
+
+      const CashfreeSDK = await loadCashfreeScript()
+      if (!CashfreeSDK) {
+        throw new Error('Cashfree checkout script could not be loaded')
+      }
+
+      const cashfree = CashfreeSDK({
+        mode: data.environment === 'production' ? 'production' : 'sandbox',
+      })
+
+      cashfree.checkout({
+        paymentSessionId: data.paymentSessionId,
+        redirectTarget: '_self',
+      })
+    } catch (err: any) {
+      alert('Cashfree error: ' + (err?.message || 'Please try again'))
       setLoadingGateway(null)
     }
   }
@@ -358,6 +417,25 @@ export default function PricingPage() {
                 )}
               </button>
 
+              {/* Cashfree Checkout */}
+              <button
+                onClick={() => handleCashfreeCheckout(billingCycle)}
+                disabled={loadingGateway !== null}
+                className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-emerald-600/30 to-teal-600/30 hover:from-emerald-600/40 hover:to-teal-600/40 border border-emerald-500/40 text-xs font-bold text-emerald-300 hover:text-white flex items-center justify-center gap-2 transition-all active:scale-[0.98] disabled:opacity-50"
+              >
+                {loadingGateway === 'cashfree' ? (
+                  <div className="flex items-center gap-2">
+                    <div className="w-3.5 h-3.5 border-2 border-emerald-400/30 border-t-emerald-400 rounded-full animate-spin" />
+                    <span>Opening Cashfree UPI / Cards...</span>
+                  </div>
+                ) : (
+                  <>
+                    <Wallet className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Pay with Cashfree (Instant UPI / GPay / PhonePe / Cards)</span>
+                  </>
+                )}
+              </button>
+
               {/* Alternative: Razorpay */}
               <button
                 onClick={() => handleRazorpayCheckout(billingCycle)}
@@ -368,8 +446,8 @@ export default function PricingPage() {
                   <span>Opening Razorpay...</span>
                 ) : (
                   <>
-                    <Smartphone className="w-3.5 h-3.5 text-emerald-400" />
-                    <span>Or Pay with Razorpay (UPI / QR / Netbanking)</span>
+                    <Smartphone className="w-3.5 h-3.5 text-zinc-400" />
+                    <span>Pay with Razorpay</span>
                   </>
                 )}
               </button>
